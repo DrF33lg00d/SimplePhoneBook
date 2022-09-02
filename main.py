@@ -4,6 +4,7 @@ from enum import Enum
 
 import telebot
 from telebot import types
+from telebot.custom_filters import TextContainsFilter, SimpleCustomFilter
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -41,15 +42,7 @@ class Settings:
         self.data = []
 
 
-class TextFilter(telebot.custom_filters.AdvancedCustomFilter):
-    key = 'text'
-
-    @staticmethod
-    def check(message: types.Message, text: list[str], **kwargs) -> bool:
-        return message.text in text
-
-
-class ReplyFilter(telebot.custom_filters.SimpleCustomFilter):
+class ReplyFilter(SimpleCustomFilter):
     key = 'is_search_reply'
 
     @staticmethod
@@ -61,7 +54,7 @@ class ReplyFilter(telebot.custom_filters.SimpleCustomFilter):
 def main() -> telebot.TeleBot:
     settings = Settings()
     bot = telebot.TeleBot(settings.token)
-    bot.add_custom_filter(TextFilter())
+    bot.add_custom_filter(TextContainsFilter())
     bot.add_custom_filter(ReplyFilter())
 
     @bot.message_handler(commands=['start', 'help'])
@@ -81,7 +74,7 @@ def main() -> telebot.TeleBot:
         bot.reply_to(message, 'Скрыл панель с кнопками.', reply_markup=types.ReplyKeyboardRemove())
         logger.info(f'User "{message.chat.username}" close button panel')
 
-    @bot.message_handler(text=Button.close.value)
+    @bot.message_handler(text_contains=[Button.close.value])
     def close_panel_text(message):
         close_panel(message)
 
@@ -90,7 +83,7 @@ def main() -> telebot.TeleBot:
         logger.info(f'User "{message.chat.username}" choose "{Button.search.name}".')
         bot.send_message(message.chat.id, ReplyAction.want_to_search.value, reply_markup=types.ForceReply())
 
-    @bot.message_handler(text=[Button.search.value])
+    @bot.message_handler(text_contains=[Button.search.value])
     def send_search_info_text(message):
         send_search_info(message)
 
@@ -107,7 +100,7 @@ def main() -> telebot.TeleBot:
         bot.send_message(message.chat.id, answer)
         send_buttons(message.chat.id)
 
-    @bot.message_handler(text=[Button.reload.value])
+    @bot.message_handler(text_contains=[Button.reload.value])
     def send_reload_result_text(message):
         send_reload_result(message)
 
