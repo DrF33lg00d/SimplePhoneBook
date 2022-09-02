@@ -41,9 +41,28 @@ class Settings:
         self.data = []
 
 
+class TextFilter(telebot.custom_filters.AdvancedCustomFilter):
+    key = 'text'
+
+    @staticmethod
+    def check(message: types.Message, text: list[str], **kwargs) -> bool:
+        return message.text in text
+
+
+class ReplyFilter(telebot.custom_filters.SimpleCustomFilter):
+    key = 'is_search_reply'
+
+    @staticmethod
+    def check(message: types.Message, **kwargs) -> bool:
+        return (message.reply_to_message is not None and
+                message.reply_to_message.text == ReplyAction.want_to_search.value)
+
+
 def main() -> telebot.TeleBot:
     settings = Settings()
     bot = telebot.TeleBot(settings.token)
+    bot.add_custom_filter(TextFilter())
+    bot.add_custom_filter(ReplyFilter())
 
     @bot.message_handler(commands=['start', 'help'])
     def send_welcome(message):
@@ -57,34 +76,27 @@ def main() -> telebot.TeleBot:
         send_buttons(message.chat.id)
         logger.info(f'User "{message.chat.username}" open button panel')
 
-    @bot.message_handler(commands=['сlose', 'end'])
+    @bot.message_handler(commands=[Button.close.name, 'end'])
     def close_panel(message):
         bot.reply_to(message, 'Скрыл панель с кнопками.', reply_markup=types.ReplyKeyboardRemove())
         logger.info(f'User "{message.chat.username}" close button panel')
+
+    @bot.message_handler(text=Button.close.value)
+    def close_panel_text(message):
+        close_panel(message)
 
     @bot.message_handler(commands=[Button.search.name])
     def send_search_info(message):
         logger.info(f'User "{message.chat.username}" choose "{Button.search.name}".')
         bot.send_message(message.chat.id, ReplyAction.want_to_search.value, reply_markup=types.ForceReply())
 
-    @bot.message_handler(func=lambda message: True)
-    def echo_all(message):
-        if message.text == Button.reload.value:
-            logger.info(f'User "{message.chat.username}" choose "{Button.reload.name}".')
-            send_reload_result(message)
-        elif message.text == Button.search.value:
-            send_search_info(message)
-        elif message.text == Button.close.value:
-            close_panel(message)
-        elif message.reply_to_message is not None and message.reply_to_message.text == ReplyAction.want_to_search.value:
-            logger.info(f'User "{message.chat.username}" trying to search persons by name "{message.text}".')
-            send_found_user(message)
-        else:
-            logger.info(f'User "{message.chat.username}" send message "{message.text}".')
-            bot.reply_to(message, 'Мне твои непонятные команды непонятны :|')
+    @bot.message_handler(text=[Button.search.value])
+    def send_search_info_text(message):
+        send_search_info(message)
 
-    @bot.message_handler(commands=['reload'])
+    @bot.message_handler(commands=[Button.reload.name])
     def send_reload_result(message):
+        logger.info(f'User "{message.chat.username}" choose "{Button.reload.name}".')
         try:
             settings.reload()
             answer = 'Данные обновлены.'
@@ -95,6 +107,10 @@ def main() -> telebot.TeleBot:
         bot.send_message(message.chat.id, answer)
         send_buttons(message.chat.id)
 
+    @bot.message_handler(text=[Button.reload.value])
+    def send_reload_result_text(message):
+        send_reload_result(message)
+
     def send_buttons(chat_id: id) -> [types.ReplyKeyboardMarkup, str]:
         markup = types.ReplyKeyboardMarkup(row_width=3)
         search_btn = types.KeyboardButton(Button.search.value)
@@ -103,7 +119,9 @@ def main() -> telebot.TeleBot:
         markup.add(search_btn, reload_btn, close_btn)
         bot.send_message(chat_id, 'Выбери одну из опций:', reply_markup=markup)
 
+    @bot.message_handler(is_search_reply=True)
     def send_found_user(message):
+        logger.info(f'User "{message.chat.username}" trying to search persons by name "{message.text}".')
         search_person = message.text.lower()
         people = [item for item in settings.data if search_person in item['name'].lower()]
         if people:
@@ -114,6 +132,11 @@ def main() -> telebot.TeleBot:
             bot.reply_to(message, 'С такими именами тебе только в цирк.')
             logger.info(f'User "{message.chat.username}" cannot found anything.')
         send_buttons(message.chat.id)
+
+    @bot.message_handler(func=lambda message: True)
+    def echo_all(message):
+        logger.info(f'User "{message.chat.username}" send message "{message.text}".')
+        bot.reply_to(message, 'Мне твои непонятные команды непонятны :|')
 
     return bot
 
