@@ -1,10 +1,11 @@
 import json
 import logging
+import asyncio
 from enum import Enum
 
-import telebot
+from telebot.async_telebot import AsyncTeleBot
 from telebot import types
-from telebot.custom_filters import TextContainsFilter, SimpleCustomFilter
+from telebot.asyncio_filters import TextContainsFilter, SimpleCustomFilter
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -51,44 +52,39 @@ class ReplyFilter(SimpleCustomFilter):
                 message.reply_to_message.text == ReplyAction.want_to_search.value)
 
 
-def main() -> telebot.TeleBot:
+def main() -> AsyncTeleBot:
     settings = Settings()
-    bot = telebot.TeleBot(settings.token)
+    bot = AsyncTeleBot(settings.token)
     bot.add_custom_filter(TextContainsFilter())
     bot.add_custom_filter(ReplyFilter())
 
     @bot.message_handler(commands=['start', 'help'])
-    def send_welcome(message):
+    async def send_welcome(message: types.Message) -> None:
         answer = 'Привет! Используй команды, которые бот может тебе предложить. Не бойся, они рабочие.'
-        bot.reply_to(message, answer)
+        await bot.reply_to(message, answer)
         logger.info(f'Send to "{message.chat.username}" message - "{answer}"')
-        send_buttons(message.chat.id)
+        await send_buttons(message.chat.id)
 
     @bot.message_handler(commands=['open'])
-    def open_panel(message):
-        send_buttons(message.chat.id)
+    async def open_panel(message: types.Message) -> None:
+        await send_buttons(message.chat.id)
         logger.info(f'User "{message.chat.username}" open button panel')
 
     @bot.message_handler(commands=[Button.close.name, 'end'])
-    def close_panel(message):
-        bot.reply_to(message, 'Скрыл панель с кнопками.', reply_markup=types.ReplyKeyboardRemove())
+    @bot.message_handler(text_contains=[Button.close.value])
+    async def close_panel(message: types.Message) -> None:
+        await bot.reply_to(message, 'Скрыл панель с кнопками.', reply_markup=types.ReplyKeyboardRemove())
         logger.info(f'User "{message.chat.username}" close button panel')
 
-    @bot.message_handler(text_contains=[Button.close.value])
-    def close_panel_text(message):
-        close_panel(message)
-
     @bot.message_handler(commands=[Button.search.name])
-    def send_search_info(message):
-        logger.info(f'User "{message.chat.username}" choose "{Button.search.name}".')
-        bot.send_message(message.chat.id, ReplyAction.want_to_search.value, reply_markup=types.ForceReply())
-
     @bot.message_handler(text_contains=[Button.search.value])
-    def send_search_info_text(message):
-        send_search_info(message)
+    async def send_search_info(message: types.Message) -> None:
+        logger.info(f'User "{message.chat.username}" choose "{Button.search.name}".')
+        await bot.send_message(message.chat.id, ReplyAction.want_to_search.value, reply_markup=types.ForceReply())
 
     @bot.message_handler(commands=[Button.reload.name])
-    def send_reload_result(message):
+    @bot.message_handler(text_contains=[Button.reload.value])
+    async def send_reload_result(message: types.Message) -> None:
         logger.info(f'User "{message.chat.username}" choose "{Button.reload.name}".')
         try:
             settings.reload()
@@ -97,43 +93,39 @@ def main() -> telebot.TeleBot:
         except Exception:
             answer = 'Данные не удалось обновить.'
             logger.warning(f'User "{message.chat.username}" trying to update setting, it fails.')
-        bot.send_message(message.chat.id, answer)
-        send_buttons(message.chat.id)
+        await bot.send_message(message.chat.id, answer)
+        await send_buttons(message.chat.id)
 
-    @bot.message_handler(text_contains=[Button.reload.value])
-    def send_reload_result_text(message):
-        send_reload_result(message)
-
-    def send_buttons(chat_id: id) -> [types.ReplyKeyboardMarkup, str]:
+    async def send_buttons(chat_id: int) -> None:
         markup = types.ReplyKeyboardMarkup(row_width=3)
         search_btn = types.KeyboardButton(Button.search.value)
         reload_btn = types.KeyboardButton(Button.reload.value)
         close_btn = types.KeyboardButton(Button.close.value)
         markup.add(search_btn, reload_btn, close_btn)
-        bot.send_message(chat_id, 'Выбери одну из опций:', reply_markup=markup)
+        await bot.send_message(chat_id, 'Выбери одну из опций:', reply_markup=markup)
 
     @bot.message_handler(is_search_reply=True)
-    def send_found_user(message):
+    async def send_found_user(message: types.Message) -> None:
         logger.info(f'User "{message.chat.username}" trying to search persons by name "{message.text}".')
         search_person = message.text.lower()
         people = [item for item in settings.data if search_person in item['name'].lower()]
         if people:
             answer = [f'Контакт:\t{person["name"]}\nНомер:\t[{person["phone_number"]}](tel:{person["phone_number"]})' for person in people]
-            bot.reply_to(message, '\n\n'.join(answer), parse_mode='Markdown')
+            await bot.reply_to(message, '\n\n'.join(answer), parse_mode='Markdown')
             logger.info(f'User "{message.chat.username}" found users: {len(people)}.')
         else:
-            bot.reply_to(message, 'С такими именами тебе только в цирк.')
+            await bot.reply_to(message, 'С такими именами тебе только в цирк.')
             logger.info(f'User "{message.chat.username}" cannot found anything.')
-        send_buttons(message.chat.id)
+        await send_buttons(message.chat.id)
 
     @bot.message_handler(func=lambda message: True)
-    def echo_all(message):
+    async def echo_all(message: types.Message) -> None:
         logger.info(f'User "{message.chat.username}" send message "{message.text}".')
-        bot.reply_to(message, 'Мне твои непонятные команды непонятны :|')
+        await bot.reply_to(message, 'Мне твои непонятные команды непонятны :|')
 
     return bot
 
 
 if __name__ == '__main__':
     bot = main()
-    bot.infinity_polling()
+    asyncio.run(bot.infinity_polling(skip_pending=True))
